@@ -125,8 +125,11 @@ def get_existing_dns_records():
         
         default_records = []
         for record in response.recordsets:
-            # 'default' 代表 "全网默认" 线路
-            if record.line == "default":
+            # ★★★ 关键修复点 ★★★
+            # 检查 record 对象是否有 line 属性。
+            # 如果没有 line 属性，也意味着它是“全网默认”线路。
+            # 如果有 line 属性，则需要判断其值是否为 "default"。
+            if not hasattr(record, 'line') or record.line == "default":
                 default_records.append(record)
 
         print(f"查询到 {len(default_records)} 条已存在的【全网默认】A 记录。")
@@ -154,7 +157,6 @@ def create_dns_record_set(ip_list):
         
     print(f"准备为【全网默认】线路创建包含 {len(ip_list)} 个 IP 的 A 记录...")
     try:
-        # ★★★ 关键修复点 ★★★
         # 先创建 body 对象，不传入 line 参数
         body = CreateRecordSetRequestBody(
             name=DOMAIN_NAME + ".",
