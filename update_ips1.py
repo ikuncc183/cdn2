@@ -125,7 +125,6 @@ def get_existing_dns_records():
         
         default_records = []
         for record in response.recordsets:
-            # ★★★ 关键修改点 1: 增加对线路(line)的判断 ★★★
             # 'default' 代表 "全网默认" 线路
             if record.line == "default":
                 default_records.append(record)
@@ -155,14 +154,16 @@ def create_dns_record_set(ip_list):
         
     print(f"准备为【全网默认】线路创建包含 {len(ip_list)} 个 IP 的 A 记录...")
     try:
-        # ★★★ 关键修改点 2: 创建时明确指定 line 为 'default' ★★★
+        # ★★★ 关键修复点 ★★★
+        # 先创建 body 对象，不传入 line 参数
         body = CreateRecordSetRequestBody(
             name=DOMAIN_NAME + ".",
             type="A",
-            line="default", # 指定线路为全网默认
             records=ip_list,
             ttl=60
         )
+        # 再将 line 作为对象的属性来设置
+        body.line = "default"
         
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
