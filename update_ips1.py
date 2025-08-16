@@ -1,4 +1,4 @@
-# update_ips.py
+# update_ips_by_line.py
 import os
 import requests
 import json
@@ -40,8 +40,8 @@ def init_huawei_dns_client():
         return False
     
     credentials = BasicCredentials(ak=HUAWEI_CLOUD_AK,
-                                   sk=HUAWEI_CLOUD_SK,
-                                   project_id=HUAWEI_CLOUD_PROJECT_ID)
+                                     sk=HUAWEI_CLOUD_SK,
+                                     project_id=HUAWEI_CLOUD_PROJECT_ID)
     
     try:
         dns_client = DnsClient.new_builder() \
@@ -66,6 +66,7 @@ def get_zone_id():
         request = ListPublicZonesRequest()
         response = dns_client.list_public_zones(request)
         for z in response.zones:
+            # 华为云返回的 zone name 会自带一个点
             if z.name == HUAWEI_CLOUD_ZONE_NAME + ".":
                 zone_id = z.id
                 print(f"成功找到 Zone ID: {zone_id}")
@@ -104,31 +105,39 @@ def get_preferred_ips():
         except requests.RequestException as e:
             print(f"错误: 请求优选 IP 时发生错误: {e}")
             if attempt < retry_count - 1:
+                print(f"将在 {retry_delay} 秒后重试...")
                 time.sleep(retry_delay)
             else:
                 return []
     return []
 
 def get_existing_dns_records():
-    """获取当前域名已有的 A 记录 (华为云版)"""
-    print(f"正在查询域名 {DOMAIN_NAME} 的现有 DNS A 记录...")
+    """获取当前域名【全网默认】的 A 记录"""
+    print(f"正在查询域名 {DOMAIN_NAME} 的现有【全网默认】DNS A 记录...")
     try:
-        request = ListRecordSetsByZoneRequest(zone_id=zone_id)
+        # 使用 name 和 type 参数在服务端进行初步过滤，提高效率
+        request = ListRecordSetsByZoneRequest(
+            zone_id=zone_id,
+            name=DOMAIN_NAME + ".",
+            type="A" 
+        )
         response = dns_client.list_record_sets_by_zone(request)
         
-        matching_records = []
+        default_records = []
         for record in response.recordsets:
-            if record.name == DOMAIN_NAME + "." and record.type == "A":
-                matching_records.append(record)
+            # ★★★ 关键修改点 1: 增加对线路(line)的判断 ★★★
+            # 'default' 代表 "全网默认" 线路
+            if record.line == "default":
+                default_records.append(record)
 
-        print(f"查询到 {len(matching_records)} 条已存在的 A 记录。")
-        return matching_records
+        print(f"查询到 {len(default_records)} 条已存在的【全网默认】A 记录。")
+        return default_records
     except exceptions.ClientRequestException as e:
         print(f"错误: 查询 DNS 记录时发生错误: {e}")
         return []
 
 def delete_dns_record(record_id):
-    """删除指定的 DNS 记录 (华为云版)"""
+    """删除指定的 DNS 记录"""
     try:
         request = DeleteRecordSetRequest(zone_id=zone_id, recordset_id=record_id)
         dns_client.delete_record_set(request)
@@ -139,23 +148,25 @@ def delete_dns_record(record_id):
         return False
 
 def create_dns_record_set(ip_list):
-    """将所有 IP 创建到一个解析记录集中 (华为云版)"""
+    """为【全网默认】线路创建一条包含所有 IP 的解析记录"""
     if not ip_list:
         print("IP 列表为空，无需创建记录。")
         return False
         
-    print(f"准备将 {len(ip_list)} 个 IP 创建到一个解析记录集中...")
+    print(f"准备为【全网默认】线路创建包含 {len(ip_list)} 个 IP 的 A 记录...")
     try:
-        # 核心修改：将所有 IP 放入 records 列表中，一次性创建
-        body = CreateRecordSetRequestBody(name=DOMAIN_NAME + ".", type="A", records=ip_list, ttl=60)
-        
-        # 对于加权解析，权重是记录集(RecordSet)的属性，而不是单个IP的。
-        # 如果需要，可以取消下面一行的注释来设置权重。默认为1。
-        # body.weight = 1 
+        # ★★★ 关键修改点 2: 创建时明确指定 line 为 'default' ★★★
+        body = CreateRecordSetRequestBody(
+            name=DOMAIN_NAME + ".",
+            type="A",
+            line="default", # 指定线路为全网默认
+            records=ip_list,
+            ttl=60
+        )
         
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
-        print(f"成功为 {DOMAIN_NAME} 创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
+        print(f"成功为 {DOMAIN_NAME} 的【全网默认】线路创建了包含 {len(ip_list)} 个 IP 的 A 记录。")
         return True
     except exceptions.ClientRequestException as e:
         print(f"错误: 创建解析记录集时失败: {e}")
@@ -163,7 +174,7 @@ def create_dns_record_set(ip_list):
 
 def main():
     """主执行函数"""
-    print("--- 开始更新华为云优选 IP ---")
+    print("--- 开始更新华为云优选 IP (仅限全网默认线路) ---")
     
     if not all([DOMAIN_NAME]):
         print("错误: 缺少必要的 DOMAIN_NAME 环境变量。")
@@ -180,14 +191,14 @@ def main():
 
     existing_records = get_existing_dns_records()
     if existing_records:
-        print("\n--- 开始删除旧的 DNS 记录 ---")
+        print("\n--- 开始删除旧的【全网默认】DNS 记录 ---")
+        # 华为云通常会将同一线路的多个IP放在一个 record set 中，所以大部分情况只会有一条记录
         for record in existing_records:
             delete_dns_record(record.id)
     else:
-        print("没有需要删除的旧记录。")
+        print("没有需要删除的旧【全网默认】记录。")
 
-    print("\n--- 开始创建新的 DNS 记录 ---")
-    # 核心修改：不再循环，而是调用新的函数一次性创建所有记录
+    print("\n--- 开始创建新的【全网默认】DNS 记录 ---")
     if create_dns_record_set(new_ips):
         print(f"\n--- 更新完成 ---")
     else:
