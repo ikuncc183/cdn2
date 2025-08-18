@@ -111,13 +111,16 @@ def create_cname_record():
     """为【全网默认】线路创建一条 CNAME 解析记录"""
     print(f"准备为 {DOMAIN_NAME} 的【全网默认】线路创建 CNAME 记录，指向 {CNAME_TARGET}...")
     try:
+        # ★★★ 关键修复点 ★★★
+        # 先创建 body 对象，不传入 line 参数
         body = CreateRecordSetRequestBody(
             name=DOMAIN_NAME + ".",
             type="CNAME",
             records=[CNAME_TARGET],
-            ttl=300,
-            line="default" # 明确指定线路为 default
+            ttl=300
         )
+        # 再将 line 作为对象的属性来设置
+        body.line = "default"
         
         request = CreateRecordSetRequest(zone_id=zone_id, body=body)
         dns_client.create_record_set(request)
